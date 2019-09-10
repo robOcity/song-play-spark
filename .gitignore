@@ -111,3 +111,7 @@ venv.bak/
 
 # configuration files
 *.cfg
+
+# data files
+/data/interim
+/data/processed
