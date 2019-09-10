@@ -1,7 +1,6 @@
 import configparser
 from datetime import datetime
 import os
-from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F, types as T
 from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, date_format
@@ -18,14 +17,14 @@ def create_spark_session():
 def process_song_data(spark, input_data, output_data):
 
     # read the song data file into a dataframe
-    songs_df = spark.read.json(Path('./data') / 'song-data.zip')
+    songs_df = spark.read.json(path='./data/interim/song_data', multiLine=True)
     print(songs_df.printSchema())
 
     # extract columns from the songs dataframe
     songs_df = songs_df.select(['song_id', 'title', 'artist_id', 'year', 'duration'])
     
     # write songs dataframe to parquet files partitioned by year and artist
-    songs_df.write.parquet(Path('.data/') / 'star-schema' / 'tables')
+    songs_df.write.parquet('./data/processed/star_schema')
 
     # # extract columns to create artists table
     # artists_table = 
