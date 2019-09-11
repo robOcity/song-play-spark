@@ -13,25 +13,58 @@ def create_spark_session():
         .getOrCreate()
     return spark
 
+def from_disk(session, schema, path):
+    return session.read.json(
+        path=path, 
+        schema=schema, 
+        multiLine=True)
+
+def to_disk(df, path, mode='overwrite'):
+    df.write.mode(mode).parquet(path)
 
 def process_song_data(spark, input_data, output_data):
 
+    # specify schema for dataframe
+    song_schema = T.StructType([
+        T.StructField('song_id', T.StringType()),
+        T.StructField('num_songs', T.IntegerType()),
+        T.StructField('title', T.StringType()),
+        T.StructField('artist_name', T.StringType()),
+        T.StructField('artist_latitude', T.DoubleType()),
+        T.StructField('year', T.IntegerType()),
+        T.StructField('duration', T.DoubleType()),
+        T.StructField('artist_id', T.StringType()),
+        T.StructField('artist_longitude', T.DoubleType()),
+        T.StructField('artist_location', T.StringType())
+    ]) 
+
     # read the song data file into a dataframe
-    songs_df = spark.read.json(path='./data/interim/song_data', multiLine=True)
-    print(songs_df.printSchema())
+    songs_df = from_disk(spark, song_schema, './data/interim/song_data')
 
     # extract columns from the songs dataframe
-    songs_df = songs_df.select(['song_id', 'title', 'artist_id', 'year', 'duration'])
+    songs_table_df = songs_df.select([
+        'song_id', 
+        'title', 
+        'year', 
+        'duration', 
+        'artist_id'
+        ])
     
     # write songs dataframe to parquet files partitioned by year and artist
-    songs_df.write.parquet('./data/processed/star_schema')
+    #songs_table_df.write.mode('overwrite').parquet('./data/processed/star_schema/dim_song')
+    to_disk(songs_table_df, './data/processed/star_schema/dim_song')
 
     # # extract columns to create artists table
-    # artists_table = 
+    artists_table_df = songs_df.select([
+        'artist_id', 
+        'artist_name', 
+        'artist_location', 
+        'artist_latitude', 
+        'artist_longitude'])
     
-    # # write artists table to parquet files
-    # artists_table
-
+    # write artists table to parquet files
+    #artists_table_df.write.mode('overwrite').parquet('./data/processed/star_schema/dim_artist')
+    to_disk(artists_table_df, './data/processed/star_schema/dim_artist')
 
 def process_log_data(spark, input_data, output_data):
     pass
