@@ -76,7 +76,8 @@ def process_log_data(spark, input_data, output_data):
 
 def main():
     config = configparser.ConfigParser()
-    config.read('dl.cfg')
+    config.read('.env/dl.cfg')
+    print(type(config), config)
 
     os.environ['AWS_ACCESS_KEY_ID']=config['AWS']['AWS_ACCESS_KEY_ID']
     os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
