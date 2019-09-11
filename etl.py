@@ -51,7 +51,6 @@ def process_song_data(spark, input_data, output_data):
         ])
     
     # write songs dataframe to parquet files partitioned by year and artist
-    #songs_table_df.write.mode('overwrite').parquet('./data/processed/star_schema/dim_song')
     to_disk(songs_table_df, './data/processed/star_schema/dim_song')
 
     # # extract columns to create artists table
@@ -63,7 +62,6 @@ def process_song_data(spark, input_data, output_data):
         'artist_longitude'])
     
     # write artists table to parquet files
-    #artists_table_df.write.mode('overwrite').parquet('./data/processed/star_schema/dim_artist')
     to_disk(artists_table_df, './data/processed/star_schema/dim_artist')
 
 def process_log_data(spark, input_data, output_data):
