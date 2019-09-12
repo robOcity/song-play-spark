@@ -1,6 +1,7 @@
 import configparser
 from datetime import datetime
 import os
+import shutil
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F, types as T
 from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, date_format
@@ -22,6 +23,26 @@ def from_disk(session, schema, path):
 def to_disk(df, path, mode='overwrite'):
     df.write.mode(mode).parquet(path)
 
+def rmdir(target):
+    try:
+        shutil.rmtree(target)
+    except OSError as e:
+        print(f'Error: {e.filename} - {e.strerror}')
+
+def mkdir(target):
+    try:
+        os.mkdir(target)
+    except OSError as e:
+        print(f'Error: {e.filename} - {e.strerror}')
+
+def inspect_df(title, df):
+    message = (
+        f'\n{80 * "-"}\n'\
+        f'{title.upper()}: {df.toPandas().info()}\n{df.toPandas().head()}'\
+        f'\n{80 * "-"}\n'
+    )
+    print(message)
+
 def process_song_data(spark, input_data, output_data):
 
     # specify schema for dataframe
@@ -39,7 +60,8 @@ def process_song_data(spark, input_data, output_data):
     ]) 
 
     # read the song data file into a dataframe
-    songs_df = from_disk(spark, song_schema, './data/interim/song_data')
+    songs_df = from_disk(spark, song_schema, input_data + '/song_data')
+    inspect_df('Song Data:', songs_df)
 
     # extract columns from the songs dataframe
     songs_table_df = songs_df.select([
@@ -51,7 +73,7 @@ def process_song_data(spark, input_data, output_data):
         ])
     
     # write songs dataframe to parquet files partitioned by year and artist
-    to_disk(songs_table_df, './data/processed/star_schema/dim_song')
+    to_disk(songs_table_df, output_data + '/dim_song')
 
     # # extract columns to create artists table
     artists_table_df = songs_df.select([
@@ -62,7 +84,8 @@ def process_song_data(spark, input_data, output_data):
         'artist_longitude'])
     
     # write artists table to parquet files
-    to_disk(artists_table_df, './data/processed/star_schema/dim_artist')
+    to_disk(artists_table_df, output_data + '/dim_artist')
+    inspect_df('Artist Data:', artists_table_df)
 
 def process_log_data(spark, input_data, output_data):
     
@@ -89,21 +112,23 @@ def process_log_data(spark, input_data, output_data):
     ])
 
     # read log data file
-    events_df = from_disk(spark, event_schema, './data/interim/log_data')
+    events_df = from_disk(spark, event_schema, input_data + '/log_data')
     # TODO clean up print statements
     print('1', events_df.printSchema())
     print('Before Where:', events_df.toPandas().shape)
     
     # filter by actions for song plays
     events_df = events_df.where(events_df.page == 'NextSong')
+    # TODO clean-up
     print('After Where:', events_df.toPandas().shape)
 
     # create a column containing a datetime value by converting 
     # epoch time in milliseconds stored as strings
     events_df = events_df.withColumn('start_time', F.to_timestamp('ts', 'S'))
+    # TODO clean-up
     print('2', events_df.printSchema())
 
-    # apply consistent naming scheme
+    # apply consistent naming scheme retaining only these columns
     events_df = events_df.selectExpr([
         'firstName as first_name',
         'lastName as last_name',
@@ -113,6 +138,7 @@ def process_log_data(spark, input_data, output_data):
         'level as level',
         'start_time as start_time'])
     
+    # TODO clean-up
     print('3', events_df.printSchema())
 
     # extract columns for users table    
@@ -124,7 +150,8 @@ def process_log_data(spark, input_data, output_data):
         'level'])
 
     # write users table to parquet files
-    to_disk(users_table_df, './data/processed/star_schema/dim_user')
+    to_disk(users_table_df, output_data + '/dim_user')
+    inspect_df('User Data:', users_table_df)
 
     # extract columns to create time table
     time_table_df = events_df.select(['start_time'])
@@ -137,12 +164,8 @@ def process_log_data(spark, input_data, output_data):
     time_table_df = time_table_df.withColumn('weekday_str', F.date_format('start_time', 'EEE'))
     
     # write time table to parquet files partitioned by year and month
-    # TODO refactor into function
-    STAR_SCHEMA_PATH = './data/processed/star_schema/'
-    #curr_dir = os.path.dirname(__full__)
-    time_table_df = (time_table_df.write.
-        partitionBy('year', 'month').
-        parquet(os.path.join(STAR_SCHEMA_PATH, 'dim_time')))
+    time_table_df.write.partitionBy('year', 'month').parquet(output_data + '/dim_time')
+    inspect_df('Time Data:', time_table_df)
 
     # read in song data to use for songplays table
     # song_df = events_df.select([''])
@@ -163,16 +186,22 @@ def main():
     os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
 
     spark = create_spark_session()
-    #TODO fix
-    input_data = "./data/logs"
-    output_data = "./data/star-tables"
+
+    # localhost paths for initial development
+    input_data = './data/interim/'
+    output_data = './data/processed/'
+
+    # create a clean slate for each run
+    rmdir(output_data)
+    mkdir(output_data)
+
+    # AWS S3 paths for deployment to AWS EMR
     # input_data = "s3a://udacity-dend/"
     # output_data = ""
-    
-    # TODO uncomments once log data processing is working
-    #process_song_data(spark, input_data, output_data)    
-    process_log_data(spark, input_data, output_data)
 
+    # processing 
+    process_song_data(spark, input_data, output_data)    
+    process_log_data(spark, input_data, output_data)
 
 if __name__ == "__main__":
     main()
