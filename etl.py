@@ -12,16 +12,9 @@ def create_spark_session():
         .builder \
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:2.7.0") \
         .getOrCreate()
+    #TODO clean-up
+    print(f'\ncreate_spark_session() --> {type(spark)}\n')
     return spark
-
-def from_disk(session, schema, path):
-    return session.read.json(
-        path=path, 
-        schema=schema, 
-        multiLine=True)
-
-def to_disk(df, path, mode='overwrite'):
-    df.write.mode(mode).parquet(path)
 
 def rmdir(target):
     try:
@@ -43,8 +36,25 @@ def inspect_df(title, df):
     )
     print(message)
 
-def process_song_data(spark, input_data, output_data):
+def from_disk(session, schema, path, depth=0):
+    
+    # create path using wildcard characters to read directory trees to given depth
+    wild_card_path = path + ''.join(['/*'for _ in range(depth)]) + '.json'
+    
+    return session.read.json(
+        path=wild_card_path, 
+        schema=schema, 
+        multiLine=True,
+        encoding='UTF-8',
+        mode='DROPMALFORMED')
 
+def to_disk(df, path, mode='overwrite'):
+    df.write.mode(mode).parquet(path)
+
+def inspect_df(title, df):
+    print(f'{title.upper()}:\n{df.show(5)}')
+
+def build_song_schema():
     # specify schema for dataframe
     song_schema = T.StructType([
         T.StructField('song_id', T.StringType()),
@@ -58,10 +68,15 @@ def process_song_data(spark, input_data, output_data):
         T.StructField('artist_longitude', T.DoubleType()),
         T.StructField('artist_location', T.StringType())
     ]) 
+    return song_schema
+
+def process_song_data(spark, input_data, output_data):
+
+    song_schema = build_song_schema()
 
     # read the song data file into a dataframe
-    songs_df = from_disk(spark, song_schema, input_data + '/song_data')
-    inspect_df('Song Data:', songs_df)
+    songs_df = from_disk(spark, song_schema, input_data, depth=4)
+    inspect_df('songs_df', songs_df)
 
     # extract columns from the songs dataframe
     songs_table_df = songs_df.select([
@@ -73,6 +88,7 @@ def process_song_data(spark, input_data, output_data):
         ])
     
     # write songs dataframe to parquet files partitioned by year and artist
+    inspect_df('songs_table_df', songs_table_df)
     to_disk(songs_table_df, output_data + '/dim_song')
 
     # # extract columns to create artists table
@@ -84,12 +100,10 @@ def process_song_data(spark, input_data, output_data):
         'artist_longitude'])
     
     # write artists table to parquet files
+    inspect_df('artists_table_df', artists_table_df)
     to_disk(artists_table_df, output_data + '/dim_artist')
-    inspect_df('Artist Data:', artists_table_df)
 
-def process_log_data(spark, input_data, output_data):
-    
-    # specify schema for dataframe
+def build_event_schema():
     event_schema = T.StructType([
         T.StructField('artist', T.StringType()),
         T.StructField('auth', T.StringType()),
@@ -110,24 +124,27 @@ def process_log_data(spark, input_data, output_data):
         T.StructField('userAgent', T.StringType()),
         T.StructField('userId', T.StringType())
     ])
+    return event_schema
 
+def process_log_data(spark, input_data, output_data):
+    
+    # specify schema for dataframe
+    event_schema = build_event_schema()
+    
     # read log data file
-    events_df = from_disk(spark, event_schema, input_data + '/log_data')
-    # TODO clean up print statements
-    print('1', events_df.printSchema())
-    print('Before Where:', events_df.toPandas().shape)
+    events_df = from_disk(spark, event_schema, input_data, depth=3)
     
     # filter by actions for song plays
-    events_df = events_df.where(events_df.page == 'NextSong')
-    # TODO clean-up
-    print('After Where:', events_df.toPandas().shape)
-
+    events_df = events_df.filter(events_df.page == 'NextSong')
+    
     # create a column containing a datetime value by converting 
     # epoch time in milliseconds stored as strings
-    events_df = events_df.withColumn('start_time', F.to_timestamp('ts', 'S'))
-    # TODO clean-up
-    print('2', events_df.printSchema())
-
+    print(f'Events Columns: {events_df.columns}')
+    print(events_df.printSchema())
+    to_timestamp = F.udf(lambda s: datetime.fromtimestamp((int(s)/1000)), T.TimestampType())
+    events_df = events_df.withColumn('start_time', to_timestamp(events_df.ts))
+    inspect_df('events_df', events_df)
+    
     # apply consistent naming scheme retaining only these columns
     events_df = events_df.selectExpr([
         'firstName as first_name',
@@ -137,23 +154,24 @@ def process_log_data(spark, input_data, output_data):
         'gender as gender',
         'level as level',
         'start_time as start_time'])
-    
-    # TODO clean-up
-    print('3', events_df.printSchema())
 
-    # extract columns for users table    
+    # extract columns for users table 
     users_table_df = events_df.select([
         'user_id', 
         'first_name', 
         'last_name', 
         'gender', 
         'level'])
+    
+    # filter out rows with empty user_ids
+    users_table_df = users_table_df.filter(users_table_df.user_id != '')
 
     # write users table to parquet files
+    inspect_df('users_table_df', users_table_df)
     to_disk(users_table_df, output_data + '/dim_user')
-    inspect_df('User Data:', users_table_df)
 
     # extract columns to create time table
+    print(f'events_df.columns={events_df.columns}')
     time_table_df = events_df.select(['start_time'])
     time_table_df = time_table_df.withColumn('hour', F.hour('start_time'))
     time_table_df = time_table_df.withColumn('day', F.dayofmonth('start_time'))
@@ -163,45 +181,46 @@ def process_log_data(spark, input_data, output_data):
     time_table_df = time_table_df.withColumn('weekday_num', F.dayofweek('start_time'))
     time_table_df = time_table_df.withColumn('weekday_str', F.date_format('start_time', 'EEE'))
     
+    # TODO clean-up
+    inspect_df('time_table_df 1', time_table_df)
+    print(f'time_table_df.count()={time_table_df.count()}')
+    
     # write time table to parquet files partitioned by year and month
-    time_table_df.write.partitionBy('year', 'month').parquet(output_data + '/dim_time')
-    inspect_df('Time Data:', time_table_df)
+    time_table_df.write.mode('overwrite').partitionBy('year', 'month').parquet(output_data + '/dim_time')
+    
+    # TODO clean-up
+    inspect_df('time_table_df 2', time_table_df)
+    print(f'time_table_df.count()={time_table_df.count()}')
 
     # read in song data to use for songplays table
     # song_df = events_df.select([''])
 
     # extract columns from joined song and log datasets to create songplays table 
-    # songplays_table = 
 
     # write songplays table to parquet files partitioned by year and month
     # songplays_table
 
-
-def main():
+def main(config_data, song_data, log_data, output_data):
     config = configparser.ConfigParser()
-    config.read('.env/dl.cfg')
+    config.read(config_data)
     print(type(config), config)
 
+    # get
     os.environ['AWS_ACCESS_KEY_ID']=config['AWS']['AWS_ACCESS_KEY_ID']
     os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
 
-    spark = create_spark_session()
-
-    # localhost paths for initial development
-    input_data = './data/interim/'
-    output_data = './data/processed/'
-
-    # create a clean slate for each run
-    rmdir(output_data)
-    mkdir(output_data)
-
-    # AWS S3 paths for deployment to AWS EMR
-    # input_data = "s3a://udacity-dend/"
-    # output_data = ""
-
     # processing 
-    process_song_data(spark, input_data, output_data)    
-    process_log_data(spark, input_data, output_data)
-
+    spark = create_spark_session()
+    process_song_data(spark, song_data, output_data)    
+    process_log_data(spark, log_data, output_data)
+    
 if __name__ == "__main__":
-    main()
+
+    # data paths
+    config_data = "https://dend-util.s3-us-west-2.amazonaws.com/config/dl.cfg"
+    song_data = "s3a://udacity-dend/song_data"
+    log_data = "s3a://udacity-dend/log_data"
+    output_data = "s3://song-play-spark"
+
+    main(config_data, song_data, log_data, output_data)
+
