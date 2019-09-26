@@ -11,6 +11,7 @@ from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, dat
 
 
 def create_spark_session():
+    """Return a SparkSession object."""
     spark = SparkSession \
         .builder \
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:2.7.0") \
@@ -19,19 +20,19 @@ def create_spark_session():
     print(f'\ncreate_spark_session() --> {type(spark)}\n')
     return spark
 
-def rmdir(target):
-    try:
-        shutil.rmtree(target)
-    except OSError as e:
-        print(f'Error: {e.filename} - {e.strerror}')
-
-def mkdir(target):
-    try:
-        os.mkdir(target)
-    except OSError as e:
-        print(f'Error: {e.filename} - {e.strerror}')
 
 def from_disk(session, schema, path, depth=0, extension=None):
+    """Return a DataFrame object from files read.
+
+    Arguments:
+    session -- SparkSession object 
+    schema  -- data types for each column
+    path    -- location where files are stored
+    
+    Keyword arguments:
+    depth     -- depth of directory tree underneth path to data files
+    extension -- file extension to read (json or parquet)"""
+
     
     depth = depth if depth > 0 else 1
     wild_card_path = path + '/'.join(['*'for _ in range(depth)]) + '.' + extension
@@ -52,12 +53,31 @@ def from_disk(session, schema, path, depth=0, extension=None):
     return df
 
 def to_disk(df, path, mode='overwrite'):
+    """Write a DataFrame object to disk.
+
+    Arguments:
+    df   -- Dataframe object to persist
+    path -- location where files are stored
+    
+    Keyword arguments:
+    mode -- method to handle existing files"""
+
     df.write.mode(mode).parquet(path)
 
-def inspect_df(title, df):
-    print(f'{title.upper()}:\n{df.show(5)}')
+def inspect_df(title, df, n=5):
+    """Print out first n rows of the Dataframe.
+
+    Arguments:
+    title -- Label applied to table
+    df    -- Dataframe to display.
+
+    Keyword Arguments:
+    n -- number of rows to display"""
+
+    print(f'{title.upper()}:\n{df.show(n)}')
 
 def build_song_schema():
+    """Return the StructType with the column, type relation for the songs dataset."""
     # specify schema for dataframe
     song_schema = T.StructType([
         T.StructField('song_id', T.StringType()),
@@ -74,6 +94,13 @@ def build_song_schema():
     return song_schema
 
 def process_song_data(spark, input_data, output_data):
+    """Process the song data storing song and artist dimension tables.
+    
+    Arguments:
+    spark       -- SparkSession object
+    input_data  -- path to the raw song data files
+    output_data -- path to write out the dimesion tables"""
+    
 
     song_schema = build_song_schema()
 
@@ -107,6 +134,7 @@ def process_song_data(spark, input_data, output_data):
     to_disk(artists_table_df, output_data + '/dim_artist')
 
 def build_event_schema():
+    """Return the StructType with the column, type relation for the event log dataset."""
     event_schema = T.StructType([
         T.StructField('artist', T.StringType()),
         T.StructField('auth', T.StringType()),
@@ -130,6 +158,13 @@ def build_event_schema():
     return event_schema
 
 def add_time_columns(df, timestamp_column):
+    """Return a Dataframe containing columns of time and date values.
+    
+    Arguments: 
+    df  -- Dataframe containing a timestamp column to parse
+    timestamp_column -- Column to parse into time and date values
+    """
+
     # create a column containing a datetime value by converting 
     # epoch time in milliseconds stored as strings
     to_timestamp = F.udf(lambda s: datetime.fromtimestamp((int(s)/1000)), T.TimestampType())
@@ -144,7 +179,14 @@ def add_time_columns(df, timestamp_column):
     return time_df
 
 def process_log_data(spark, input_data, output_data):
-    #TODO break out processing into one function / table
+    """Process the event log data storing users, time and songplay dimension tables.
+    
+    Arguments:
+    spark       -- SparkSession object
+    input_data  -- path to the raw event log data files
+    output_data -- path to write out the resulting dimesion tables"""
+
+    #TODO break out processing into one function / dimension table
     
     # specify schema for dataframe
     event_schema = build_event_schema()
@@ -252,6 +294,12 @@ def process_log_data(spark, input_data, output_data):
 
 
 def get_config(config, group):
+    """Return the tuple of song_data, log_data and output_data paths.
+    
+    Arguments:
+    config  -- ConfigParser object used to extract data values
+    group   -- Top-level grouping of config values (AWS or LOCAL)"""
+
     group = group.upper()
     return config[group]['SONG_DATA'], config[group]['LOG_DATA'], config[group]['OUTPUT_DATA']
 
@@ -260,7 +308,9 @@ def set_aws_keys_in_env(config):
     os.environ['AWS_ACCESS_KEY_ID']=config['AWS']['AWS_ACCESS_KEY_ID']
     os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
 
-def main():
+def main(): 
+    """Allows program to be run locally or remotely on AWS EMR cluster."""
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('-a', '--aws', help='run spark job on an aws emr cluster', action='store_true')
     parser.add_argument('-l', '--local', help='run spark job locally', action='store_true')
