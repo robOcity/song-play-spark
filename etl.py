@@ -154,6 +154,7 @@ def process_log_data(spark, input_data, output_data):
         'lastName as last_name',
         'userId as user_id', 
         'song as title',
+        'length as length',
         'gender as gender',
         'level as level',
         'sessionId as session_id',
@@ -212,20 +213,28 @@ def process_log_data(spark, input_data, output_data):
     artist_table_df = from_disk(spark, None, output_data + '/dim_artist/', extension='parquet')
     inspect_df('artist_table_df', artist_table_df)
     
-    # # inner join of dataframes on artist_id and selecting columns of interest
-    # song_artist_table_df = (song_table_df.
-    #     join(artist_table_df, 'artist_id').
-    #     select(['song_id', 'title', 'duration', 'artist_id', 'name']))
+    # inner join of dataframes on artist_id and selecting columns of interest
+    song_artist_table_df = (song_table_df.
+        join(artist_table_df, 'artist_id').
+        select(['song_id', 'title', 'duration', 'artist_id', 'artist_name']))
+
+    # TODO clean-up
+    print('events_df', events_df.columns)
+    print('song_artist_table_df', song_artist_table_df.columns)
+
     
-    # # extract columns from joined song and log datasets to create songplays table 
-    # songplay_table_df = events_df.join(
-    #     song_artist_table_df, 
-    #     (events_df.song == song_artist_table_df.title) and (events_df.length == song_artist_table_df.duration)
-    # )
+    # extract columns from joined song and log datasets to create songplays table 
+    songplay_table_df = events_df.join(
+        song_artist_table_df, 
+        (events_df.title == song_artist_table_df.title) & (events_df.length == song_artist_table_df.duration)
+    )
     
     # # only keep song play activity
-    # songplay_table_df = songplay_table_df.where(events_df.page == 'NextSong')
+    songplay_table_df = songplay_table_df.where(events_df.page == 'NextSong')
     
+    # TODO clean-up
+    print('songplay_table_df', songplay_table_df.columns)
+
     # # write songplays table to parquet files partitioned by year and month
     # songplay_table_df.write.mode('overwrite').parquet(output_data + '/fact_songplay/', partitionBy=['year', 'month'])
 
