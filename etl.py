@@ -153,6 +153,7 @@ def process_log_data(spark, input_data, output_data):
     
     # create a column containing a datetime value by converting 
     # epoch time in milliseconds stored as strings
+    # TODO clean-up
     print(f'Events Columns: {events_df.columns}')
     print(events_df.printSchema())
     to_timestamp = F.udf(lambda s: datetime.fromtimestamp((int(s)/1000)), T.TimestampType())
@@ -264,6 +265,7 @@ def main():
 
     song_data, log_data, output_data = None, None, None
 
+    # TODO clean-up
     print(args.aws, args.local, config)
     if args.aws:
         set_aws_keys_in_env(config)
