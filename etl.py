@@ -5,7 +5,8 @@ import shutil
 import sys
 import argparse
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as F, types as T
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
 from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, date_format
 
 
@@ -129,7 +130,10 @@ def build_event_schema():
     return event_schema
 
 def add_time_columns(df, timestamp_column):
-    time_df = df.select(['start_time'])
+    # create a column containing a datetime value by converting 
+    # epoch time in milliseconds stored as strings
+    to_timestamp = F.udf(lambda s: datetime.fromtimestamp((int(s)/1000)), T.TimestampType())
+    time_df = df.withColumn('start_time', to_timestamp(df[timestamp_column]))
     time_df = time_df.withColumn('hour', F.hour('start_time'))
     time_df = time_df.withColumn('day', F.dayofmonth('start_time'))
     time_df = time_df.withColumn('week', F.weekofyear('start_time'))
@@ -151,15 +155,6 @@ def process_log_data(spark, input_data, output_data):
     # filter by actions for song plays
     events_df = events_df.filter(events_df.page == 'NextSong')
     
-    # create a column containing a datetime value by converting 
-    # epoch time in milliseconds stored as strings
-    # TODO clean-up
-    print(f'Events Columns: {events_df.columns}')
-    print(events_df.printSchema())
-    to_timestamp = F.udf(lambda s: datetime.fromtimestamp((int(s)/1000)), T.TimestampType())
-    events_df = events_df.withColumn('start_time', to_timestamp(events_df.ts))
-    inspect_df('events_df', events_df)
-    
     # apply consistent naming scheme retaining only these columns
     events_df = events_df.selectExpr([
         'firstName as first_name',
@@ -172,7 +167,7 @@ def process_log_data(spark, input_data, output_data):
         'sessionId as session_id',
         'location as location',
         'page as page',
-        'start_time as start_time'])
+        'ts as start_time'])
 
     # extract columns for users table 
     users_table_df = events_df.select([
@@ -192,7 +187,9 @@ def process_log_data(spark, input_data, output_data):
     # TODO create function to add these fields to the provided df
     # extract columns to create time table
     print(f'events_df.columns={events_df.columns}')
-    time_table_df = add_time_columns(events_df, 'start_time')
+
+    # add time-related columns after removing unrelated columns
+    time_table_df = add_time_columns(events_df.select(['start_time']), 'start_time')
     
     # TODO clean-up
     inspect_df('time_table_df 1', time_table_df)
@@ -224,24 +221,33 @@ def process_log_data(spark, input_data, output_data):
         select(['song_id', 'title', 'duration', 'artist_id', 'artist_name']))
 
     # TODO clean-up
-    print('events_df', events_df.columns)
-    print('song_artist_table_df', song_artist_table_df.columns)
+    inspect_df('song_artist_table_df', song_artist_table_df)
 
-    
     # extract columns from joined song and log datasets to create songplays table 
-    songplay_table_df = events_df.join(
-        song_artist_table_df, 
-        (events_df.title == song_artist_table_df.title) & (events_df.length == song_artist_table_df.duration)
-    )
-    
-    # # only keep song play activity
-    songplay_table_df = songplay_table_df.where(events_df.page == 'NextSong')
-    
-    # TODO clean-up
-    print('songplay_table_df', songplay_table_df.columns)
+    e_df = events_df.alias('e_df')
+    sa_df = song_artist_table_df.alias('sa_df')
 
+    # TODO clean-up
+    inspect_df('sa_df', sa_df)
+    inspect_df('e_df', e_df)
+
+    cond = [e_df.title == sa_df.title, e_df.length == sa_df.duration]
+    cols = [
+        'first_name', 'last_name', 'user_id', 'gender', 'level', 
+        'e_df.title', 'song_id', 'length', 
+        'artist_id', 'artist_name', 'location', 
+        'start_time']
+    songplay_table_df = (e_df.join(sa_df, cond)).select(cols)
+
+    # TODO clean-up
+    inspect_df('songplay_table_df', songplay_table_df)
+    
     # # write songplays table to parquet files partitioned by year and month
     songplay_table_df = add_time_columns(songplay_table_df, 'start_time')
+
+    # TODO clean-up
+    print('songplay_table_df', songplay_table_df.columns)
+    inspect_df('songplay_table_df', songplay_table_df)
     songplay_table_df.write.mode('overwrite').parquet(output_data + '/fact_songplay/', partitionBy=['year', 'month'])
 
 
