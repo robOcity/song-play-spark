@@ -2,6 +2,8 @@ import configparser
 from datetime import datetime
 import os
 import shutil
+import sys
+import argparse
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F, types as T
 from pyspark.sql.functions import year, month, dayofmonth, hour, weekofyear, date_format
@@ -28,25 +30,25 @@ def mkdir(target):
     except OSError as e:
         print(f'Error: {e.filename} - {e.strerror}')
 
-def inspect_df(title, df):
-    message = (
-        f'\n{80 * "-"}\n'\
-        f'{title.upper()}: {df.toPandas().info()}\n{df.toPandas().head()}'\
-        f'\n{80 * "-"}\n'
-    )
-    print(message)
-
-def from_disk(session, schema, path, depth=0):
+def from_disk(session, schema, path, depth=0, extension=None):
     
-    # create path using wildcard characters to read directory trees to given depth
-    wild_card_path = path + ''.join(['/*'for _ in range(depth)]) + '.json'
+    depth = depth if depth > 0 else 1
+    wild_card_path = path + '/'.join(['*'for _ in range(depth)]) + '.' + extension
     
-    return session.read.json(
-        path=wild_card_path, 
-        schema=schema, 
-        multiLine=True,
-        encoding='UTF-8',
-        mode='DROPMALFORMED')
+    df = None
+    if extension == 'json':
+        df = session.read.json(
+            path=wild_card_path, 
+            schema=schema, 
+            multiLine=True,
+            encoding='UTF-8',
+            mode='DROPMALFORMED')
+    elif extension == 'parquet':
+        df = session.read.parquet(wild_card_path)
+    else:
+        print(f'ERROR: {extension} files are not supported')
+        
+    return df
 
 def to_disk(df, path, mode='overwrite'):
     df.write.mode(mode).parquet(path)
@@ -75,7 +77,7 @@ def process_song_data(spark, input_data, output_data):
     song_schema = build_song_schema()
 
     # read the song data file into a dataframe
-    songs_df = from_disk(spark, song_schema, input_data, depth=4)
+    songs_df = from_disk(spark, song_schema, input_data, depth=4, extension='json')
     inspect_df('songs_df', songs_df)
 
     # extract columns from the songs dataframe
@@ -127,12 +129,13 @@ def build_event_schema():
     return event_schema
 
 def process_log_data(spark, input_data, output_data):
+    #TODO break out processing into one function / table
     
     # specify schema for dataframe
     event_schema = build_event_schema()
     
     # read log data file
-    events_df = from_disk(spark, event_schema, input_data, depth=3)
+    events_df = from_disk(spark, event_schema, input_data, depth=3, extension='json')
     
     # filter by actions for song plays
     events_df = events_df.filter(events_df.page == 'NextSong')
@@ -153,6 +156,9 @@ def process_log_data(spark, input_data, output_data):
         'song as title',
         'gender as gender',
         'level as level',
+        'sessionId as session_id',
+        'location as location',
+        'page as page',
         'start_time as start_time'])
 
     # extract columns for users table 
@@ -170,6 +176,7 @@ def process_log_data(spark, input_data, output_data):
     inspect_df('users_table_df', users_table_df)
     to_disk(users_table_df, output_data + '/dim_user')
 
+    # TODO create function to add these fields to the provided df
     # extract columns to create time table
     print(f'events_df.columns={events_df.columns}')
     time_table_df = events_df.select(['start_time'])
@@ -193,21 +200,70 @@ def process_log_data(spark, input_data, output_data):
     print(f'time_table_df.count()={time_table_df.count()}')
 
     # read in song data to use for songplays table
-    # song_df = events_df.select([''])
+    # s3://song-play-spark/dim_song/*.parquet
+    song_df = events_df.select(['user_id', 'session_id', 'start_time', 'level', 'location'])
+    inspect_df('song_df', song_df)
 
-    # extract columns from joined song and log datasets to create songplays table 
+    # read in the song table
+    song_table_df = from_disk(spark, None, output_data + '/dim_song/', extension='parquet')
+    inspect_df('song_table_df', song_table_df)
+    
+    # read in the artist table
+    artist_table_df = from_disk(spark, None, output_data + '/dim_artist/', extension='parquet')
+    inspect_df('artist_table_df', artist_table_df)
+    
+    # # inner join of dataframes on artist_id and selecting columns of interest
+    # song_artist_table_df = (song_table_df.
+    #     join(artist_table_df, 'artist_id').
+    #     select(['song_id', 'title', 'duration', 'artist_id', 'name']))
+    
+    # # extract columns from joined song and log datasets to create songplays table 
+    # songplay_table_df = events_df.join(
+    #     song_artist_table_df, 
+    #     (events_df.song == song_artist_table_df.title) and (events_df.length == song_artist_table_df.duration)
+    # )
+    
+    # # only keep song play activity
+    # songplay_table_df = songplay_table_df.where(events_df.page == 'NextSong')
+    
+    # # write songplays table to parquet files partitioned by year and month
+    # songplay_table_df.write.mode('overwrite').parquet(output_data + '/fact_songplay/', partitionBy=['year', 'month'])
 
-    # write songplays table to parquet files partitioned by year and month
-    # songplays_table
 
-def main(config_data, song_data, log_data, output_data):
-    config = configparser.ConfigParser()
-    config.read(config_data)
-    print(type(config), config)
+def get_config(config, group):
+    group = group.upper()
+    return config[group]['SONG_DATA'], config[group]['LOG_DATA'], config[group]['OUTPUT_DATA']
 
-    # get
+
+def set_aws_keys_in_env(config):
     os.environ['AWS_ACCESS_KEY_ID']=config['AWS']['AWS_ACCESS_KEY_ID']
     os.environ['AWS_SECRET_ACCESS_KEY']=config['AWS']['AWS_SECRET_ACCESS_KEY']
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-a', '--aws', help='run spark job on an aws emr cluster', action='store_true')
+    parser.add_argument('-l', '--local', help='run spark job locally', action='store_true')
+    args = parser.parse_args()
+
+    config = configparser.ConfigParser()
+    config.read('.env/dl.cfg')
+
+    song_data, log_data, output_data = None, None, None
+
+    print(args.aws, args.local, config)
+    if args.aws:
+        set_aws_keys_in_env(config)
+        song_data, log_data, output_data = get_config(config, 'aws')
+    elif args.local:
+        song_data, log_data, output_data = get_config(config, 'local')
+    else:
+        parser.print_help()
+        sys.exit(-1)
+
+    # TODO clean-up
+    print('\n', 80*'*')
+    print(song_data, log_data, output_data)
+    print(80*'*', '\n')
 
     # processing 
     spark = create_spark_session()
@@ -215,12 +271,5 @@ def main(config_data, song_data, log_data, output_data):
     process_log_data(spark, log_data, output_data)
     
 if __name__ == "__main__":
-
-    # data paths
-    config_data = "https://dend-util.s3-us-west-2.amazonaws.com/config/dl.cfg"
-    song_data = "s3a://udacity-dend/song_data"
-    log_data = "s3a://udacity-dend/log_data"
-    output_data = "s3://song-play-spark"
-
-    main(config_data, song_data, log_data, output_data)
+    main()
 
