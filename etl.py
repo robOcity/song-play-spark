@@ -128,6 +128,17 @@ def build_event_schema():
     ])
     return event_schema
 
+def add_time_columns(df, timestamp_column):
+    time_df = df.select(['start_time'])
+    time_df = time_df.withColumn('hour', F.hour('start_time'))
+    time_df = time_df.withColumn('day', F.dayofmonth('start_time'))
+    time_df = time_df.withColumn('week', F.weekofyear('start_time'))
+    time_df = time_df.withColumn('month', F.month('start_time'))
+    time_df = time_df.withColumn('year', F.year('start_time'))
+    time_df = time_df.withColumn('weekday_num', F.dayofweek('start_time'))
+    time_df = time_df.withColumn('weekday_str', F.date_format('start_time', 'EEE'))
+    return time_df
+
 def process_log_data(spark, input_data, output_data):
     #TODO break out processing into one function / table
     
@@ -180,14 +191,7 @@ def process_log_data(spark, input_data, output_data):
     # TODO create function to add these fields to the provided df
     # extract columns to create time table
     print(f'events_df.columns={events_df.columns}')
-    time_table_df = events_df.select(['start_time'])
-    time_table_df = time_table_df.withColumn('hour', F.hour('start_time'))
-    time_table_df = time_table_df.withColumn('day', F.dayofmonth('start_time'))
-    time_table_df = time_table_df.withColumn('week', F.weekofyear('start_time'))
-    time_table_df = time_table_df.withColumn('month', F.month('start_time'))
-    time_table_df = time_table_df.withColumn('year', F.year('start_time'))
-    time_table_df = time_table_df.withColumn('weekday_num', F.dayofweek('start_time'))
-    time_table_df = time_table_df.withColumn('weekday_str', F.date_format('start_time', 'EEE'))
+    time_table_df = add_time_columns(events_df, 'start_time')
     
     # TODO clean-up
     inspect_df('time_table_df 1', time_table_df)
@@ -236,7 +240,8 @@ def process_log_data(spark, input_data, output_data):
     print('songplay_table_df', songplay_table_df.columns)
 
     # # write songplays table to parquet files partitioned by year and month
-    # songplay_table_df.write.mode('overwrite').parquet(output_data + '/fact_songplay/', partitionBy=['year', 'month'])
+    songplay_table_df = add_time_columns(songplay_table_df, 'start_time')
+    songplay_table_df.write.mode('overwrite').parquet(output_data + '/fact_songplay/', partitionBy=['year', 'month'])
 
 
 def get_config(config, group):
