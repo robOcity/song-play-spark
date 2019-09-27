@@ -1,6 +1,6 @@
 # PySpark ETL pipeline using AWS EMR and AWS S3
 
-Extract song play activity from logs stored on [AWS S3](https://aws.amazon.com/emr/) and transform them into a star schema consisting of a central fact table (songplay) and related dimension tables (song, artist, user, time) using PySpark running on [AWS EMR](https://aws.amazon.com/emr/).  
+Extract song play activity from logs stored on [AWS S3](https://aws.amazon.com/emr/) and transform them into a star schema consisting of a central fact table (songplay) and related dimension tables (song, artist, user, time) using [PySpark](https://databricks.com/glossary/pyspark) running on [AWS EMR](https://aws.amazon.com/emr/).  
 
 ## Purpose
 
@@ -54,3 +54,5 @@ OUTPUT_DATA=data/interim/processed/
     `df1.alias("a").join(df2.alias("b"), df1['id'] == df2['id']).select("a.id", "a.val1", "b.val2").show()`
 
 1. [Apache PySpark by Example](https://www.lynda.com/Spark-DataFrames-tutorials/Apache-PySpark-Example/802868-2.html) -- An excellent and short introduction to using PySpark for data analysis.  Available for free through most public libraries.  
+
+1. [](https://spark.apache.org/docs/2.1.0/api/python/index.html#) - Excellent documentation of the API and examples of how to use it.
