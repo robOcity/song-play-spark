@@ -8,9 +8,11 @@ Sparkify -- a fictitious startup -- wants to analyze the data they have been col
 
 ## Design
 
+What songs are users's listening to?  To answer this question I will need to create an extract-transform-and-load pipeline to restructure the Sparkify data.  
+
 ![Song Play ETL](images/song-play-spark-arch.png)
 
-What songs are users's listening to?  To answer this question I will need to create an extract-transform-and-load pipeline to restructure the Sparkify data.  Log files are gathered from subscriber activities by Sparkify's online transactional processing (OLTP) system and written to AWS S3 storage.  Star schemas are commonly used in data warehouses applications to support online analytical processing systems (OLAP) needs.  PySpark code running a AWS EMR cluster is used to transform the raw JSON logs into star schemas simplifying analytic queries.
+Log files are gathered from subscriber activities by Sparkify's online transactional processing (OLTP) system and written to AWS S3 storage.  Star schemas are commonly used in data warehouses applications to support online analytical processing systems (OLAP) needs.  PySpark code running a AWS EMR cluster is used to transform the raw JSON logs into star schemas simplifying analytic queries.
 
 ## File Descriptions
 
@@ -55,4 +57,4 @@ OUTPUT_DATA=data/interim/processed/
 
 1. [Apache PySpark by Example](https://www.lynda.com/Spark-DataFrames-tutorials/Apache-PySpark-Example/802868-2.html) -- An excellent and short introduction to using PySpark for data analysis.  Available for free through most public libraries.  
 
-1. [](https://spark.apache.org/docs/2.1.0/api/python/index.html#) - Excellent documentation of the API and examples of how to use it.
+1. [Spark Python API Docs](https://spark.apache.org/docs/2.1.0/api/python/index.html#) - Excellent documentation of the API and examples of how to use it.
